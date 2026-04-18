@@ -1,8 +1,7 @@
 import asyncio
 import logging
-import os
 import base64
-from io import BytesIO
+import os
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -11,15 +10,13 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 import httpx
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")   # ← твой ключ с openrouter.ai
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Лучшая модель для ретуши с сохранением лица (Nano Banana 2)
-MODEL_NAME = "google/gemini-3.1-flash-image-preview"   # Nano Banana 2
-
-# Можно поменять на "google/gemini-2.5-flash-image" если будет дороже/медленнее
+# Nano Banana 2 — лучшая модель для ретуши с сохранением лица
+MODEL_NAME = "google/gemini-3.1-flash-image-preview"
 
 PROMPTS = {
     "enhance": "Улучши качество фото, сделай его чётче, красивее и профессиональнее, но НЕ меняй лицо человека и его черты.",
@@ -35,9 +32,8 @@ photo_storage = {}
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
-        "👋 Бот-ретушёр запущен на **OpenRouter + Nano Banana 2**!\n\n"
-        "У тебя есть баланс — отлично!\n"
-        "Отправь фото и выбери действие."
+        "👋 Бот на **OpenRouter + Nano Banana 2** готов!\n\n"
+        "Отправь фото и выбери кнопку. Баланс у тебя есть — должно работать."
     )
 
 @dp.message(F.photo)
@@ -69,18 +65,18 @@ async def process_callback(callback: CallbackQuery):
     prompt_key = callback.data
     prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
 
-    await callback.answer("🔄 Обрабатываю через Nano Banana 2 (OpenRouter)...")
+    await callback.answer("🔄 Обрабатываю через Nano Banana 2...")
 
     photo_bytes = photo_storage[user_id]
     base64_image = base64.b64encode(photo_bytes).decode("utf-8")
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "HTTP-Referer": "https://t.me",   # можно оставить или поменять
+                    "HTTP-Referer": "https://t.me",
                     "X-Title": "Telegram Retouch Bot",
                 },
                 json={
@@ -103,29 +99,43 @@ async def process_callback(callback: CallbackQuery):
 
             data = response.json()
 
+            # Новый парсинг ответа OpenRouter для image-моделей
             if "choices" in data and data["choices"]:
-                message_content = data["choices"][0]["message"]["content"]
+                message_obj = data["choices"][0].get("message", {})
                 
-                # OpenRouter возвращает base64 изображения в ответе для image-моделей
-                if "data:" in message_content and "base64" in message_content:
-                    # Извлекаем base64 часть
-                    b64_data = message_content.split("base64,")[-1].split('"')[0]
+                # Вариант 1: изображение в поле images
+                if "images" in message_obj and message_obj["images"]:
+                    image_url = message_obj["images"][0]["image_url"]["url"]
+                    if image_url.startswith("data:image"):
+                        # base64 data URL
+                        b64_data = image_url.split("base64,")[-1]
+                        image_bytes = base64.b64decode(b64_data)
+                        await bot.send_photo(
+                            chat_id=user_id,
+                            photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
+                            caption=f"✅ Готово! Nano Banana 2 (OpenRouter)\nПромпт: {prompt_text[:110]}..."
+                        )
+                        return
+
+                # Вариант 2: изображение внутри content (иногда приходит так)
+                content = message_obj.get("content")
+                if isinstance(content, str) and "base64" in content:
+                    b64_data = content.split("base64,")[-1].split('"')[0] if '"' in content else content.split("base64,")[-1]
                     image_bytes = base64.b64decode(b64_data)
-                    
                     await bot.send_photo(
                         chat_id=user_id,
                         photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
-                        caption=f"✅ Готово через OpenRouter (Nano Banana 2)!\nПромпт: {prompt_text[:100]}..."
+                        caption=f"✅ Готово! Nano Banana 2\nПромпт: {prompt_text[:110]}..."
                     )
-                else:
-                    await bot.send_message(user_id, "❌ Модель не вернула изображение. Попробуй другой промпт.")
-            else:
-                error_msg = data.get("error", {}).get("message", str(data))
-                await bot.send_message(user_id, f"❌ Ошибка OpenRouter:\n{error_msg[:400]}")
+                    return
+
+            # Если ничего не нашли
+            error_msg = data.get("error", {}).get("message") or str(data)[:500]
+            await bot.send_message(user_id, f"❌ Не удалось получить изображение:\n{error_msg}")
 
     except Exception as e:
         logging.error(f"OpenRouter error: {e}")
-        await bot.send_message(user_id, f"❌ Ошибка при обработке: {str(e)[:300]}")
+        await bot.send_message(user_id, f"❌ Ошибка: {str(e)[:400]}")
 
     # Очистка
     if user_id in photo_storage:
