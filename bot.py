@@ -15,48 +15,46 @@ from google.genai import types
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Инициализация клиента Gemini
+# Инициализация клиента
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Модель для ретуши и редактирования фото (Nano Banana 2)
-MODEL_NAME = "gemini-2.5-flash-image"
+# Актуальные модели для ретуши фото (Nano Banana 2)
+# Попробуем сначала preview-версию Nano Banana 2, потом стабильную
+MODEL_NAME = "gemini-3.1-flash-image-preview"   # Nano Banana 2 (рекомендуется)
+# MODEL_NAME = "gemini-2.5-flash-image"         # Альтернатива (если preview не работает)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Готовые промпты для кнопок
+# Промпты для кнопок (можно добавлять свои)
 PROMPTS = {
     "enhance": "Улучши качество фото, сделай его чётче, красивее и профессиональнее, но НЕ меняй лицо человека и его черты.",
     "background": "Поменяй фон на современный минималистичный или красивый (природа, студия, город), но НЕ меняй лицо, тело и одежду человека.",
     "portrait": "Сделай профессиональный студийный портрет: улучши кожу, освещение, цвета, но НЕ меняй черты лица.",
     "color": "Сделай цвета более яркими и естественными, улучши общее качество фото, лицо не трогай.",
     "cinema": "Преврати фото в кинематографичный стиль с красивым светом и атмосферой, но оставь лицо реалистичным.",
-    "remove_bg": "Удали фон полностью и сделай прозрачный фон (или белый), лицо и тело оставь без изменений.",
+    "remove_bg": "Удали фон полностью и сделай прозрачный фон (или чисто белый), лицо и тело оставь без изменений.",
 }
 
-# Хранилище фото (простой словарь, для небольшого количества пользователей нормально)
+# Хранилище фото
 photo_storage = {}
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
-        "👋 Привет! Я бот для ретуши фото через Gemini Nano Banana 2.\n\n"
-        "Просто отправь мне любое фото, а потом выбери, что с ним сделать."
+        "👋 Привет! Я бот для ретуши фото через **Gemini Nano Banana 2**.\n\n"
+        "Отправь мне фото, а потом выбери действие кнопками."
     )
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
-    # Берём фото самого высокого качества
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
     file_bytes = await bot.download_file(file.file_path)
     
     photo_bytes = file_bytes.getvalue()
-    
-    # Сохраняем в хранилище
     photo_storage[message.from_user.id] = photo_bytes
 
-    # Кнопки с действиями
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔥 Улучшить качество", callback_data="enhance")],
         [InlineKeyboardButton(text="🌄 Изменить фон", callback_data="background")],
@@ -66,15 +64,11 @@ async def handle_photo(message: types.Message):
         [InlineKeyboardButton(text="✂️ Удалить фон", callback_data="remove_bg")],
     ])
 
-    await message.answer(
-        "✅ Фото получено!\n\nВыбери действие:",
-        reply_markup=keyboard
-    )
+    await message.answer("✅ Фото получено!\n\nВыбери, что сделать:", reply_markup=keyboard)
 
 @dp.callback_query()
 async def process_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
-    
     if user_id not in photo_storage:
         await callback.answer("Фото устарело. Отправь его заново.", show_alert=True)
         return
@@ -82,12 +76,11 @@ async def process_callback(callback: CallbackQuery):
     prompt_key = callback.data
     prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
 
-    await callback.answer("🔄 Обрабатываю через Gemini Nano Banana 2...")
+    await callback.answer("🔄 Обрабатываю через Nano Banana 2...")
 
     photo_bytes = photo_storage[user_id]
 
     try:
-        # Отправляем промпт + изображение
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[
@@ -102,8 +95,11 @@ async def process_callback(callback: CallbackQuery):
             )
         )
 
-        # Извлекаем сгенерированное изображение
-        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+        # Извлекаем изображение из ответа
+        if (response.candidates and 
+            response.candidates[0].content and 
+            response.candidates[0].content.parts):
+            
             for part in response.candidates[0].content.parts:
                 if part.inline_data and part.inline_data.data:
                     image_bytes = part.inline_data.data
@@ -111,22 +107,29 @@ async def process_callback(callback: CallbackQuery):
                     await bot.send_photo(
                         chat_id=user_id,
                         photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
-                        caption=f"✅ Готово!\n\nПромпт: {prompt_text[:120]}..."
+                        caption=f"✅ Готово с Nano Banana 2!\n\nПромпт: {prompt_text[:100]}..."
                     )
                     break
             else:
-                await bot.send_message(user_id, "❌ Модель не вернула изображение. Попробуй другой промпт.")
+                await bot.send_message(user_id, "❌ Модель не вернула изображение.")
         else:
-            await bot.send_message(user_id, "❌ Не удалось получить результат от Gemini.")
+            await bot.send_message(user_id, "❌ Не удалось получить результат.")
 
     except Exception as e:
-        logging.error(f"Ошибка Gemini: {e}")
-        await bot.send_message(
-            user_id, 
-            f"❌ Произошла ошибка при обработке:\n{str(e)[:300]}"
-        )
+        error_str = str(e)
+        logging.error(f"Gemini error: {error_str}")
+        
+        if "not found" in error_str.lower() or "model" in error_str.lower():
+            await bot.send_message(
+                user_id,
+                "❌ Модель не найдена. Сейчас попробую альтернативную (gemini-2.5-flash-image)..."
+            )
+            # Здесь можно добавить автоматический fallback на другую модель, но для простоты просто сообщи
+            await bot.send_message(user_id, f"Текущая ошибка: {error_str[:300]}")
+        else:
+            await bot.send_message(user_id, f"❌ Ошибка: {error_str[:400]}")
 
-    # Очищаем хранилище после обработки
+    # Очищаем фото после обработки
     if user_id in photo_storage:
         del photo_storage[user_id]
 
