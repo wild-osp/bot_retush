@@ -3,109 +3,132 @@ import logging
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from aiogram import Router
-import google.generativeai as genai
+
 import os
 from io import BytesIO
 
-# ================= НАСТРОЙКИ =================
-BOT_TOKEN = os.getenv("BOT_TOKEN")          # добавишь на bothost.ru в переменных окружения
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # тоже в переменных окружения
+# Новый Google GenAI SDK
+from google import genai
+from google.genai import types
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-3.1-flash-image")  # Nano Banana 2
+# ================= НАСТРОЙКИ =================
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Инициализация клиента Gemini
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+# Модель для ретуши и редактирования фото (Nano Banana 2)
+MODEL_NAME = "gemini-2.5-flash-image"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-router = Router()
 
-# Готовые промпты (кнопки)
+# Готовые промпты для кнопок
 PROMPTS = {
-    "enhance": "Улучши качество фото, сделай чётче и красивее, но НЕ меняй лицо человека",
-    "background": "Поменяй фон на современный минималистичный (белый/серый/природа), но НЕ меняй лицо и тело человека",
-    "portrait": "Сделай профессиональный портрет: улучши кожу, освещение, но НЕ меняй черты лица",
-    "color": "Сделай цвета ярче и естественнее, улучши качество, лицо не трогай",
-    "style": "Преврати фото в стиль кино (кинематографичный свет), лицо оставь реалистичным",
-    # Добавляй свои сюда ↓
-    # "custom1": "Твой новый промпт...",
+    "enhance": "Улучши качество фото, сделай его чётче, красивее и профессиональнее, но НЕ меняй лицо человека и его черты.",
+    "background": "Поменяй фон на современный минималистичный или красивый (природа, студия, город), но НЕ меняй лицо, тело и одежду человека.",
+    "portrait": "Сделай профессиональный студийный портрет: улучши кожу, освещение, цвета, но НЕ меняй черты лица.",
+    "color": "Сделай цвета более яркими и естественными, улучши общее качество фото, лицо не трогай.",
+    "cinema": "Преврати фото в кинематографичный стиль с красивым светом и атмосферой, но оставь лицо реалистичным.",
+    "remove_bg": "Удали фон полностью и сделай прозрачный фон (или белый), лицо и тело оставь без изменений.",
 }
 
-@router.message(Command("start"))
+# Хранилище фото (простой словарь, для небольшого количества пользователей нормально)
+photo_storage = {}
+
+@dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
-        "👋 Привет! Отправь мне фото, и я его отретуширую через Gemini Nano Banana 2.\n"
-        "Выбери действие после отправки фото:",
-        reply_markup=types.ReplyKeyboardRemove()
+        "👋 Привет! Я бот для ретуши фото через Gemini Nano Banana 2.\n\n"
+        "Просто отправь мне любое фото, а потом выбери, что с ним сделать."
     )
 
-@router.message(F.photo)
+@dp.message(F.photo)
 async def handle_photo(message: types.Message):
-    # Скачиваем фото
+    # Берём фото самого высокого качества
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
     file_bytes = await bot.download_file(file.file_path)
     
-    # Сохраняем в память
-    user_data = {message.from_user.id: file_bytes.getvalue()}
+    photo_bytes = file_bytes.getvalue()
     
-    # Кнопки
+    # Сохраняем в хранилище
+    photo_storage[message.from_user.id] = photo_bytes
+
+    # Кнопки с действиями
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔥 Улучшить качество", callback_data="enhance")],
         [InlineKeyboardButton(text="🌄 Изменить фон", callback_data="background")],
         [InlineKeyboardButton(text="🖼 Профессиональный портрет", callback_data="portrait")],
         [InlineKeyboardButton(text="🌈 Яркие цвета", callback_data="color")],
-        [InlineKeyboardButton(text="🎥 Стиль кино", callback_data="style")],
-        # Добавляй новые кнопки здесь
+        [InlineKeyboardButton(text="🎥 Кинематографичный стиль", callback_data="cinema")],
+        [InlineKeyboardButton(text="✂️ Удалить фон", callback_data="remove_bg")],
     ])
-    
-    await message.answer("✅ Фото получено! Выбери, что сделать:", reply_markup=keyboard)
-    # Сохраняем фото во временном хранилище (в aiogram можно использовать bot.storage или простой dict)
-    # Для простоты используем глобальный dict (для одного сервера нормально)
-    global photo_storage
-    if 'photo_storage' not in globals():
-        photo_storage = {}
-    photo_storage[message.from_user.id] = user_data[message.from_user.id]
 
-@router.callback_query()
+    await message.answer(
+        "✅ Фото получено!\n\nВыбери действие:",
+        reply_markup=keyboard
+    )
+
+@dp.callback_query()
 async def process_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
+    
     if user_id not in photo_storage:
-        await callback.answer("Фото устарело, отправь заново")
+        await callback.answer("Фото устарело. Отправь его заново.", show_alert=True)
         return
-    
-    prompt_key = callback.data
-    prompt = PROMPTS.get(prompt_key, "Улучши фото")
-    
-    await callback.answer("🔄 Обрабатываю через Nano Banana 2...")
-    
-    photo_bytes = photo_storage[user_id]
-    
-    # Отправляем в Gemini Nano Banana 2
-    response = model.generate_content(
-        [
-            prompt,  # твой промпт
-            {"mime_type": "image/jpeg", "data": photo_bytes}
-        ],
-        generation_config={
-            "temperature": 0.7,
-        }
-    )
-    
-    # Gemini возвращает сгенерированное изображение
-    if response.parts and hasattr(response.parts[0], 'inline_data'):
-        image_bytes = response.parts[0].inline_data.data
-        await bot.send_photo(
-            user_id,
-            photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
-            caption=f"✅ Готово! Промпт: {prompt}\n\nХочешь ещё что-то изменить? Отправь новое фото или нажми кнопку."
-        )
-    else:
-        await bot.send_message(user_id, "❌ Не удалось обработать. Попробуй другой промпт.")
-    
-    # Удаляем старое фото из памяти
-    del photo_storage[user_id]
 
-dp.include_router(router)
+    prompt_key = callback.data
+    prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
+
+    await callback.answer("🔄 Обрабатываю через Gemini Nano Banana 2...")
+
+    photo_bytes = photo_storage[user_id]
+
+    try:
+        # Отправляем промпт + изображение
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[
+                prompt_text,
+                types.Part.from_bytes(
+                    data=photo_bytes,
+                    mime_type="image/jpeg"
+                )
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.7,
+            )
+        )
+
+        # Извлекаем сгенерированное изображение
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.data:
+                    image_bytes = part.inline_data.data
+                    
+                    await bot.send_photo(
+                        chat_id=user_id,
+                        photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
+                        caption=f"✅ Готово!\n\nПромпт: {prompt_text[:120]}..."
+                    )
+                    break
+            else:
+                await bot.send_message(user_id, "❌ Модель не вернула изображение. Попробуй другой промпт.")
+        else:
+            await bot.send_message(user_id, "❌ Не удалось получить результат от Gemini.")
+
+    except Exception as e:
+        logging.error(f"Ошибка Gemini: {e}")
+        await bot.send_message(
+            user_id, 
+            f"❌ Произошла ошибка при обработке:\n{str(e)[:300]}"
+        )
+
+    # Очищаем хранилище после обработки
+    if user_id in photo_storage:
+        del photo_storage[user_id]
 
 async def main():
     logging.basicConfig(level=logging.INFO)
