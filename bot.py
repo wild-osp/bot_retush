@@ -15,16 +15,15 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Nano Banana 2 — лучшая модель для ретуши с сохранением лица
 MODEL_NAME = "google/gemini-3.1-flash-image-preview"
 
 PROMPTS = {
-    "enhance": "Улучши качество фото, сделай его чётче, красивее и профессиональнее, но НЕ меняй лицо человека и его черты.",
-    "background": "Поменяй фон на современный минималистичный или красивый (природа, студия, город), но НЕ меняй лицо, тело и одежду человека.",
-    "portrait": "Сделай профессиональный студийный портрет: улучши кожу, освещение, цвета, но НЕ меняй черты лица.",
-    "color": "Сделай цвета более яркими и естественными, улучши общее качество фото, лицо не трогай.",
-    "cinema": "Преврати фото в кинематографичный стиль с красивым светом и атмосферой, но оставь лицо реалистичным.",
-    "remove_bg": "Удали фон полностью и сделай прозрачный фон (или чисто белый), лицо и тело оставь без изменений.",
+    "enhance": "Улучши качество этого фото, сделай его чётче, красивее и профессиональнее, но НЕ меняй лицо человека и его черты. Это редактирование существующего изображения.",
+    "background": "Поменяй фон на современный минималистичный или красивый (природа, студия, город), но НЕ меняй лицо, тело и одежду человека. Это редактирование существующего фото.",
+    "portrait": "Сделай профессиональный студийный портрет: улучши кожу, освещение, цвета, но НЕ меняй черты лица. Это редактирование существующего изображения.",
+    "color": "Сделай цвета более яркими и естественными, улучши общее качество, лицо не трогай. Это редактирование фото.",
+    "cinema": "Преврати фото в кинематографичный стиль с красивым светом и атмосферой, но оставь лицо реалистичным. Это редактирование существующего изображения.",
+    "remove_bg": "Удали фон полностью и сделай прозрачный фон (или чисто белый), лицо и тело оставь без изменений. Это редактирование фото.",
 }
 
 photo_storage = {}
@@ -33,7 +32,7 @@ photo_storage = {}
 async def start(message: types.Message):
     await message.answer(
         "👋 Бот на **OpenRouter + Nano Banana 2** готов!\n\n"
-        "Отправь фото и выбери кнопку. Баланс у тебя есть — должно работать."
+        "Отправь фото → выбери кнопку. Теперь с правильными параметрами."
     )
 
 @dp.message(F.photo)
@@ -63,7 +62,7 @@ async def process_callback(callback: CallbackQuery):
         return
 
     prompt_key = callback.data
-    prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
+    base_prompt = PROMPTS.get(prompt_key, "Улучши качество этого фото, не меняя лицо.")
 
     await callback.answer("🔄 Обрабатываю через Nano Banana 2...")
 
@@ -85,7 +84,7 @@ async def process_callback(callback: CallbackQuery):
                         {
                             "role": "user",
                             "content": [
-                                {"type": "text", "text": prompt_text},
+                                {"type": "text", "text": base_prompt},
                                 {
                                     "type": "image_url",
                                     "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
@@ -93,51 +92,43 @@ async def process_callback(callback: CallbackQuery):
                             ]
                         }
                     ],
+                    "modalities": ["image", "text"],   # ← КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
                     "max_tokens": 2048,
                 }
             )
 
             data = response.json()
 
-            # Новый парсинг ответа OpenRouter для image-моделей
+            # Правильный парсинг изображения из OpenRouter
             if "choices" in data and data["choices"]:
                 message_obj = data["choices"][0].get("message", {})
-                
-                # Вариант 1: изображение в поле images
-                if "images" in message_obj and message_obj["images"]:
-                    image_url = message_obj["images"][0]["image_url"]["url"]
-                    if image_url.startswith("data:image"):
-                        # base64 data URL
-                        b64_data = image_url.split("base64,")[-1]
-                        image_bytes = base64.b64decode(b64_data)
-                        await bot.send_photo(
-                            chat_id=user_id,
-                            photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
-                            caption=f"✅ Готово! Nano Banana 2 (OpenRouter)\nПромпт: {prompt_text[:110]}..."
-                        )
-                        return
 
-                # Вариант 2: изображение внутри content (иногда приходит так)
-                content = message_obj.get("content")
-                if isinstance(content, str) and "base64" in content:
-                    b64_data = content.split("base64,")[-1].split('"')[0] if '"' in content else content.split("base64,")[-1]
-                    image_bytes = base64.b64decode(b64_data)
-                    await bot.send_photo(
-                        chat_id=user_id,
-                        photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
-                        caption=f"✅ Готово! Nano Banana 2\nПромпт: {prompt_text[:110]}..."
-                    )
+                # Основной вариант — поле images
+                if message_obj.get("images"):
+                    for img in message_obj["images"]:
+                        if img.get("image_url", {}).get("url"):
+                            image_url = img["image_url"]["url"]
+                            if image_url.startswith("data:image"):
+                                b64_data = image_url.split("base64,")[-1]
+                                image_bytes = base64.b64decode(b64_data)
+                                await bot.send_photo(
+                                    chat_id=user_id,
+                                    photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
+                                    caption=f"✅ Готово! Nano Banana 2 (OpenRouter)\nПромпт: {base_prompt[:100]}..."
+                                )
+                                break
+                    else:
+                        await bot.send_message(user_id, "❌ Изображение не найдено в ответе.")
                     return
 
-            # Если ничего не нашли
-            error_msg = data.get("error", {}).get("message") or str(data)[:500]
-            await bot.send_message(user_id, f"❌ Не удалось получить изображение:\n{error_msg}")
+            # Если не нашли изображение
+            error_msg = data.get("error", {}).get("message") or str(data)[:600]
+            await bot.send_message(user_id, f"❌ Не удалось получить результат:\n{error_msg}")
 
     except Exception as e:
         logging.error(f"OpenRouter error: {e}")
         await bot.send_message(user_id, f"❌ Ошибка: {str(e)[:400]}")
 
-    # Очистка
     if user_id in photo_storage:
         del photo_storage[user_id]
 
