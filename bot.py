@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 import os
 from io import BytesIO
 
-# Новый Google GenAI SDK
+# Новый SDK
 from google import genai
 from google.genai import types
 
@@ -17,16 +17,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Модели для Nano Banana 2 (приоритет: самая новая → запасная)
-MODELS = [
-    "gemini-3.1-flash-image-preview",   # Nano Banana 2 (основная)
-    "gemini-2.5-flash-image"            # Nano Banana (запасная)
-]
+# Основная модель Nano Banana 2
+MODEL_NAME = "gemini-3.1-flash-image-preview"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Промпты для кнопок
+# Промпты
 PROMPTS = {
     "enhance": "Улучши качество фото, сделай его чётче, красивее и профессиональнее, но НЕ меняй лицо человека и его черты.",
     "background": "Поменяй фон на современный минималистичный или красивый (природа, студия, город), но НЕ меняй лицо, тело и одежду человека.",
@@ -40,10 +37,13 @@ photo_storage = {}
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer(
-        "👋 Привет! Я бот для ретуши фото через **Gemini Nano Banana 2**.\n\n"
-        "Отправь мне фото и выбери действие кнопками."
-    )
+    # Показываем доступные модели при старте (для отладки)
+    try:
+        models = client.models.list()
+        model_list = "\n".join([m.name for m in models if "image" in m.name.lower() or "flash" in m.name.lower()])
+        await message.answer(f"👋 Бот запущен!\n\nДоступные image-модели:\n{model_list}\n\nОтправь фото.")
+    except Exception as e:
+        await message.answer("👋 Бот запущен! (не удалось вывести список моделей)\n\nОтправь мне фото.")
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
@@ -77,56 +77,46 @@ async def process_callback(callback: CallbackQuery):
     await callback.answer("🔄 Обрабатываю через Nano Banana 2...")
 
     photo_bytes = photo_storage[user_id]
-    success = False
 
-    for model_name in MODELS:
-        try:
-            await bot.send_message(user_id, f"🔄 Пробую модель: {model_name}")
-
-            response = client.models.generate_content(
-                model=model_name,
-                contents=[
-                    prompt_text,
-                    types.Part.from_bytes(
-                        data=photo_bytes,
-                        mime_type="image/jpeg"
-                    )
-                ],
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
+    try:
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[
+                prompt_text,
+                types.Part.from_bytes(
+                    data=photo_bytes,
+                    mime_type="image/jpeg"
                 )
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.7,
             )
+        )
 
-            # Извлекаем изображение
-            if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-                for part in response.candidates[0].content.parts:
-                    if part.inline_data and part.inline_data.data:
-                        image_bytes = part.inline_data.data
-                        
-                        await bot.send_photo(
-                            chat_id=user_id,
-                            photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
-                            caption=f"✅ Готово! (модель: {model_name})\n\nПромпт: {prompt_text[:100]}..."
-                        )
-                        success = True
-                        break
-                if success:
+        # Извлекаем сгенерированное изображение
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.data:
+                    image_bytes = part.inline_data.data
+                    
+                    await bot.send_photo(
+                        chat_id=user_id,
+                        photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
+                        caption=f"✅ Готово с Nano Banana 2!\n\nПромпт: {prompt_text[:120]}..."
+                    )
                     break
             else:
-                await bot.send_message(user_id, f"Модель {model_name} не вернула изображение.")
+                await bot.send_message(user_id, "❌ Модель не вернула изображение.")
+        else:
+            await bot.send_message(user_id, "❌ Пустой ответ от модели.")
 
-        except Exception as e:
-            error_str = str(e).lower()
-            logging.error(f"Ошибка с моделью {model_name}: {e}")
-            if "not found" in error_str or "model" in error_str:
-                await bot.send_message(user_id, f"❌ Модель {model_name} недоступна, пробую следующую...")
-                continue
-            else:
-                await bot.send_message(user_id, f"❌ Ошибка: {str(e)[:300]}")
-                break
-
-    if not success:
-        await bot.send_message(user_id, "❌ Не удалось обработать фото ни одной моделью. Попробуй позже или другое фото.")
+    except Exception as e:
+        error_str = str(e)
+        logging.error(f"Gemini error: {error_str}")
+        await bot.send_message(
+            user_id, 
+            f"❌ Ошибка при обработке:\n{error_str[:500]}\n\nПопробуй другое фото или проверь API-ключ."
+        )
 
     # Очистка
     if user_id in photo_storage:
