@@ -5,24 +5,23 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 import os
+import time
 
-# Google GenAI SDK
+# Google SDK
 from google import genai
 from google.genai import types as genai_types
 
-# ================= НАСТРОЙКИ =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Переключаемся на стабильную модель (лучше работает на бесплатном ключе)
+# Самая стабильная бесплатная модель для ретуши
 MODEL_NAME = "gemini-2.5-flash-image"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Промпты (можно добавлять сколько угодно)
 PROMPTS = {
     "enhance": "Улучши качество фото, сделай его чётче, красивее и профессиональнее, но НЕ меняй лицо человека и его черты.",
     "background": "Поменяй фон на современный минималистичный или красивый (природа, студия, город), но НЕ меняй лицо, тело и одежду человека.",
@@ -37,9 +36,9 @@ photo_storage = {}
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
-        "👋 Привет! Я бот для ретуши фото через **Gemini Nano Banana** (gemini-2.5-flash-image).\n\n"
-        "Отправь мне фото и выбери действие кнопками ниже.\n"
-        "Если будет лимит — подожди немного или создай новый API-ключ."
+        "👋 Привет! Это бот-ретушёр на Gemini Nano Banana.\n\n"
+        "Отправь фото → выбери кнопку.\n"
+        "Лимит бесплатный, поэтому может быть ожидание."
     )
 
 @dp.message(F.photo)
@@ -59,19 +58,19 @@ async def handle_photo(message: types.Message):
         [InlineKeyboardButton(text="✂️ Удалить фон", callback_data="remove_bg")],
     ])
 
-    await message.answer("✅ Фото получено!\n\nВыбери действие:", reply_markup=keyboard)
+    await message.answer("✅ Фото получено!\nВыбери действие:", reply_markup=keyboard)
 
 @dp.callback_query()
 async def process_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     if user_id not in photo_storage:
-        await callback.answer("Фото устарело. Отправь заново.", show_alert=True)
+        await callback.answer("Фото устарело, отправь заново.", show_alert=True)
         return
 
     prompt_key = callback.data
     prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
 
-    await callback.answer("🔄 Обрабатываю через Gemini Nano Banana...")
+    await callback.answer("🔄 Обрабатываю... (может занять 10–30 сек)")
 
     photo_bytes = photo_storage[user_id]
 
@@ -80,44 +79,33 @@ async def process_callback(callback: CallbackQuery):
             model=MODEL_NAME,
             contents=[
                 prompt_text,
-                genai_types.Part.from_bytes(
-                    data=photo_bytes,
-                    mime_type="image/jpeg"
-                )
+                genai_types.Part.from_bytes(data=photo_bytes, mime_type="image/jpeg")
             ],
-            config=genai_types.GenerateContentConfig(
-                temperature=0.7,
-            )
+            config=genai_types.GenerateContentConfig(temperature=0.7)
         )
 
-        # Извлекаем изображение
-        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-            for part in response.candidates[0].content.parts:
-                if part.inline_data and part.inline_data.data:
-                    image_bytes = part.inline_data.data
-                    
-                    await bot.send_photo(
-                        chat_id=user_id,
-                        photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
-                        caption=f"✅ Готово! (модель: {MODEL_NAME})\n\nПромпт: {prompt_text[:110]}..."
-                    )
-                    break
-            else:
-                await bot.send_message(user_id, "❌ Модель не вернула изображение.")
-        else:
-            await bot.send_message(user_id, "❌ Пустой ответ от модели.")
+        for part in response.candidates[0].content.parts:
+            if part.inline_data and part.inline_data.data:
+                image_bytes = part.inline_data.data
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=types.BufferedInputFile(image_bytes, filename="retouched.jpg"),
+                    caption=f"✅ Готово!\nПромпт: {prompt_text[:100]}..."
+                )
+                break
 
     except Exception as e:
-        error_str = str(e)
-        logging.error(f"Gemini error: {error_str}")
-        if "429" in error_str or "quota" in error_str.lower():
+        error = str(e)
+        logging.error(f"Gemini error: {error}")
+        if "429" in error or "quota" in error.lower() or "RESOURCE_EXHAUSTED" in error:
             await bot.send_message(
                 user_id,
-                "❌ Лимит запросов исчерпан (429).\n\n"
-                "Подожди 1–2 минуты или создай новый бесплатный API-ключ в https://aistudio.google.com/app/apikey"
+                "❌ Лимит бесплатных запросов исчерпан на сегодня.\n\n"
+                "Подожди до завтра (квота сбрасывается примерно в 00:00 по Тихоокеанскому времени) "
+                "или создай новый Google-аккаунт и новый API-ключ."
             )
         else:
-            await bot.send_message(user_id, f"❌ Ошибка: {error_str[:400]}")
+            await bot.send_message(user_id, f"❌ Ошибка: {error[:300]}")
 
     # Очистка
     if user_id in photo_storage:
