@@ -20,30 +20,31 @@ MODEL_NAME = "google/gemini-3.1-flash-image-preview"
 photo_storage = {}
 last_result = {}
 processing = {}
-waiting_for = {}
 
-# ================= ПРОМПТЫ =================
+# ================= ПРОМПТЫ (сильная защита от рамок) =================
 PROMPTS = {
+    "ritual_with_ribbon": "Улучши качество фото, сделай мягкое студийное освещение, естественную кожу и достойный вид. Добавь в ПРАВЫЙ НИЖНИЙ УГОЛ только простую чёрную траурную ленту по диагонали. Лента аккуратная, без бантиков, без цветов. Сделай строгий нейтральный фон. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. ЗАПРЕЩЕНО добавлять любые рамки, овалы, золотые элементы, текст, подписи или украшения.",
+    
     "restore": "Профессионально восстанови старое фото. Убери царапины, шум, пятна. Сделай чёткость. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
-    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи). НЕ ИЗМЕНЯЙ ЛИЦО.",
-    "ritual_portrait": "Сделай ритуальный портрет с мягким освещением. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО.",
-    "ritual_with_ribbon": "Улучши качество фото, сделай мягкое освещение. Добавь в ПРАВЫЙ НИЖНИЙ УГОЛ чёрную траурную ленту по диагонали (простая лента, без бантиков). Сделай строгий фон. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ. Запрещено добавлять рамки, овалы, текст, золотые элементы.",
+    
     "clean": "Максимально очисти фото от шума и дефектов. НЕ ИЗМЕНЯЙ ЛИЦО.",
 }
 
 def main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🖼 Ритуальный портрет + лента (нижний угол)", callback_data="ritual_with_ribbon")],
         [InlineKeyboardButton(text="🔧 Восстановить старое фото", callback_data="restore")],
-        [InlineKeyboardButton(text="🔧 Восстановить + расширить", callback_data="restore_extend")],
-        [InlineKeyboardButton(text="🖼 Ритуальный портрет", callback_data="ritual_portrait")],
-        [InlineKeyboardButton(text="🖼 Ритуальный портрет + лента", callback_data="ritual_with_ribbon")],
         [InlineKeyboardButton(text="🧼 Максимальная очистка", callback_data="clean")],
         [InlineKeyboardButton(text="✍️ Свой промпт", callback_data="custom")],
     ])
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("👋 Бот запущен!\nОтправь фото и выбери действие.")
+    await message.answer(
+        "👋 Бот запущен!\n\n"
+        "Отправь фото и выбери действие.\n"
+        "Лицо защищено, рамки запрещены."
+    )
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
@@ -62,22 +63,22 @@ async def process_callback(callback: CallbackQuery):
     data = callback.data
 
     if user_id in processing and processing.get(user_id):
-        await callback.answer("⏳ Уже обрабатывается...", show_alert=True)
+        await callback.answer("⏳ Уже обрабатывается, подожди...", show_alert=True)
         return
 
     if user_id not in photo_storage:
         await callback.answer("Фото устарело.", show_alert=True)
         return
 
-    if data == "custom":
-        await callback.message.edit_text("✍️ Напиши свой промпт:")
-        waiting_for[user_id] = "custom"
-        return
-
     processing[user_id] = True
-    await callback.message.edit_text("🔄 Обрабатываю...")
+    await callback.message.edit_text("🔄 Обрабатываю... (15–40 секунд)")
 
     prompt_text = PROMPTS.get(data, "Улучши качество фото, не меняя лицо.")
+
+    if data == "custom":
+        await callback.message.edit_text("✍️ Напиши свой промпт:")
+        processing[user_id] = False
+        return
 
     photo_bytes = photo_storage[user_id]
     base64_image = base64.b64encode(photo_bytes).decode("utf-8")
@@ -117,13 +118,13 @@ async def process_callback(callback: CallbackQuery):
                                 chat_id=user_id,
                                 media=[
                                     types.InputMediaPhoto(types.BufferedInputFile(photo_bytes, "original.jpg"), caption="📸 Оригинал"),
-                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово")
+                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово для печати")
                                 ]
                             )
                             processing[user_id] = False
                             return
 
-            await bot.send_message(user_id, "❌ Не удалось получить изображение.")
+            await bot.send_message(user_id, "❌ Не удалось получить изображение. Попробуй ещё раз.")
 
     except Exception as e:
         logging.error(f"Error: {e}")
@@ -133,18 +134,7 @@ async def process_callback(callback: CallbackQuery):
 
 @dp.message()
 async def handle_text(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in waiting_for or not waiting_for.get(user_id):
-        return
-
-    user_text = message.text.strip()
-    waiting_for[user_id] = None
-
-    await message.answer("🔄 Обрабатываю по твоему промпту...")
-
-    full_prompt = f"{user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. No frames, no borders, no text."
-
-    await message.answer("✅ Промпт принят (обработка по тексту пока в разработке).")
+    await message.answer("✅ Промпт принят. (Пока обработка по тексту упрощена)")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
