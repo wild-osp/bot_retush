@@ -18,76 +18,79 @@ dp = Dispatcher()
 
 MODEL_NAME = "google/gemini-3.1-flash-image-preview"
 
-photo_storage = {}      # оригинал
+photo_storage = {}      # оригинальное фото
 last_result = {}        # последнее обработанное фото
 processing = {}         # защита от двойного нажатия
 
-# ================= ПРОМПТЫ =================
+# ================= ПРОМПТЫ (сильная защита лица) =================
 PROMPTS = {
-    "restore": "Профессионально восстанови старое повреждённое фото. Убери царапины, шум, пятна, трещины. Сделай чёткость и естественные цвета. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани полное сходство.",
+    "restore": "Профессионально восстанови старое или повреждённое фото. Убери царапины, шум, пятна, трещины, выцветание. Сделай чёткость и естественные цвета. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани полное сходство. Photorealistic, high detail.",
     
-    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи и фон, чтобы фото было крупнее). НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Всё должно быть пропорционально и естественно.",
+    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи и фон, чтобы фото стало крупнее). НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Всё должно быть пропорционально и естественно.",
     
-    "ritual_portrait": "Сделай красивое ритуальное портретное фото: мягкое студийное освещение, спокойный достойный вид. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА.",
+    "ritual_portrait": "Сделай красивое ритуальное портретное фото с мягким студийным освещением и достойным видом. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство.",
     
-    "ritual_with_ribbon": "Сделай ритуальный портрет и добавь в ПРАВЫЙ НИЖНИЙ УГОЛ чёрную траурную ленту по диагонали. Лента простая, без бантиков и цветов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+    "ritual_with_ribbon": "Сделай ритуальный портрет и добавь в ПРАВЫЙ НИЖНИЙ УГОЛ чёрную траурную ленту по диагонали. Лента простая, аккуратная, только лента, без бантиков, без цветов, без украшений. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
     
-    "ritual_strict": "Сделай ритуальный портрет со строгим фоном и строгой одеждой. Никаких крестов, цветов и траурных элементов кроме возможной ленты. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+    "ritual_strict": "Сделай ритуальный портрет со строгим фоном и строгой одеждой (тёмный костюм или платье). Никаких крестов и лишних траурных элементов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
     
     "bg_auto": "Поменяй фон на спокойный нейтральный фон, подходящий для ритуальной печати. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА.",
     
-    "clothes_auto": "Поменяй одежду на строгую траурную (тёмный костюм или платье). НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Одежда должна быть пропорциональной.",
+    "clothes_auto": "Поменяй одежду на строгую траурную одежду. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Одежда должна быть пропорциональной.",
 }
 
 def main_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔧 Восстановление старого фото", callback_data="menu:restore")
-    builder.button(text="🖼 Ритуальный портрет", callback_data="menu:ritual")
-    builder.button(text="🌫 Смена фона", callback_data="menu:bg")
-    builder.button(text="👔 Смена одежды", callback_data="menu:clothes")
-    builder.button(text="🧼 Максимальная очистка", callback_data="clean")
-    builder.button(text="🎨 Восстановление цвета", callback_data="color_restore")
-    builder.button(text="✍️ Свой промпт", callback_data="custom")
-    builder.button(text="🔄 Доработать последнее фото", callback_data="redo_last")
-    builder.adjust(1)
-    return builder.as_markup()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔧 Восстановление старого фото", callback_data="menu:restore")
+    kb.button(text="🖼 Ритуальный портрет", callback_data="menu:ritual")
+    kb.button(text="🌫 Смена фона", callback_data="menu:bg")
+    kb.button(text="👔 Смена одежды", callback_data="menu:clothes")
+    kb.button(text="🧼 Максимальная очистка", callback_data="clean")
+    kb.button(text="🎨 Восстановить цвета", callback_data="color_restore")
+    kb.button(text="✍️ Свой промпт", callback_data="custom")
+    kb.button(text="🔄 Доработать последнее фото", callback_data="redo_last")
+    kb.adjust(1)
+    return kb.as_markup()
 
 def restore_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Восстановить старое фото", callback_data="restore")
-    builder.button(text="Восстановить + расширить размер", callback_data="restore_extend")
-    builder.button(text="← Назад", callback_data="back:main")
-    builder.adjust(1)
-    return builder.as_markup()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Восстановить старое фото", callback_data="restore")
+    kb.button(text="Восстановить + расширить размер", callback_data="restore_extend")
+    kb.button(text="← Назад", callback_data="back:main")
+    kb.adjust(1)
+    return kb.as_markup()
 
 def ritual_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Ритуальный портрет", callback_data="ritual_portrait")
-    builder.button(text="Ритуальный портрет + лента", callback_data="ritual_with_ribbon")
-    builder.button(text="Ритуальный портрет + строгий фон и одежда", callback_data="ritual_strict")
-    builder.button(text="← Назад", callback_data="back:main")
-    builder.adjust(1)
-    return builder.as_markup()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Ритуальный портрет", callback_data="ritual_portrait")
+    kb.button(text="Ритуальный портрет + лента", callback_data="ritual_with_ribbon")
+    kb.button(text="Ритуальный портрет + строгий фон и одежда", callback_data="ritual_strict")
+    kb.button(text="← Назад", callback_data="back:main")
+    kb.adjust(1)
+    return kb.as_markup()
 
 def bg_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Автоподбор спокойного фона", callback_data="bg_auto")
-    builder.button(text="Смена фона по моему описанию", callback_data="bg_custom")
-    builder.button(text="← Назад", callback_data="back:main")
-    builder.adjust(1)
-    return builder.as_markup()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Автоподбор спокойного фона", callback_data="bg_auto")
+    kb.button(text="Смена фона по моему описанию", callback_data="bg_custom")
+    kb.button(text="← Назад", callback_data="back:main")
+    kb.adjust(1)
+    return kb.as_markup()
 
 def clothes_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Автоподбор строгой одежды", callback_data="clothes_auto")
-    builder.button(text="Смена одежды по моему описанию", callback_data="clothes_custom")
-    builder.button(text="← Назад", callback_data="back:main")
-    builder.adjust(1)
-    return builder.as_markup()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Автоподбор строгой одежды", callback_data="clothes_auto")
+    kb.button(text="Смена одежды по моему описанию", callback_data="clothes_custom")
+    kb.button(text="← Назад", callback_data="back:main")
+    kb.adjust(1)
+    return kb.as_markup()
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("👋 Ритуальный ретушёр готов!\nОтправь фото и выбирай действие.")
+    await message.answer(
+        "👋 Ритуальный ретушёр готов к работе!\n\n"
+        "Отправь фото и выбирай нужное действие."
+    )
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
@@ -99,51 +102,50 @@ async def handle_photo(message: types.Message):
     last_result[user_id] = None
     processing[user_id] = False
 
-    await message.answer("✅ Фото получено!\nЧто нужно сделать?", reply_markup=main_keyboard())
+    await message.answer("✅ Фото получено!\nЧто нужно сделать для траурной печати?", reply_markup=main_keyboard())
 
 @dp.callback_query()
 async def process_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     data = callback.data
 
-    if user_id in processing and processing[user_id]:
-        await callback.answer("⏳ Уже обрабатывается...", show_alert=True)
+    if user_id in processing and processing.get(user_id):
+        await callback.answer("⏳ Уже обрабатывается, подожди...", show_alert=True)
         return
 
     if user_id not in photo_storage:
         await callback.answer("Фото устарело. Отправь заново.", show_alert=True)
         return
 
-    # Подменю
-    if data.startswith("menu:"):
-        if data == "menu:restore":
-            await callback.message.edit_reply_markup(reply_markup=restore_keyboard())
-        elif data == "menu:ritual":
-            await callback.message.edit_reply_markup(reply_markup=ritual_keyboard())
-        elif data == "menu:bg":
-            await callback.message.edit_reply_markup(reply_markup=bg_keyboard())
-        elif data == "menu:clothes":
-            await callback.message.edit_reply_markup(reply_markup=clothes_keyboard())
+    # Открытие подменю
+    if data == "menu:restore":
+        await callback.message.edit_reply_markup(reply_markup=restore_keyboard())
         return
-
+    if data == "menu:ritual":
+        await callback.message.edit_reply_markup(reply_markup=ritual_keyboard())
+        return
+    if data == "menu:bg":
+        await callback.message.edit_reply_markup(reply_markup=bg_keyboard())
+        return
+    if data == "menu:clothes":
+        await callback.message.edit_reply_markup(reply_markup=clothes_keyboard())
+        return
     if data == "back:main":
         await callback.message.edit_reply_markup(reply_markup=main_keyboard())
         return
 
     # Защита от двойного нажатия
     processing[user_id] = True
-    await callback.answer("🔄 Обрабатываю...")
+    await callback.answer("🔄 Обрабатываю через Nano Banana 2...")
 
-    # Определяем промпт
     prompt_key = data
     prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
 
-    if prompt_key in ["bg_custom", "clothes_custom"]:
-        await callback.message.edit_text("✍️ Напиши, какой фон / какую одежду хочешь.")
-        processing[user_id] = False
-        return
-
-    photo_bytes = last_result.get(user_id) if prompt_key == "redo_last" and last_result.get(user_id) else photo_storage[user_id]
+    # Выбираем какое фото обрабатывать
+    if prompt_key == "redo_last" and last_result.get(user_id):
+        photo_bytes = last_result[user_id]
+    else:
+        photo_bytes = photo_storage[user_id]
 
     base64_image = base64.b64encode(photo_bytes).decode("utf-8")
 
@@ -181,32 +183,31 @@ async def process_callback(callback: CallbackQuery):
                             await bot.send_media_group(
                                 chat_id=user_id,
                                 media=[
-                                    types.InputMediaPhoto(types.BufferedInputFile(photo_bytes, "original.jpg"), caption="📸 Оригинал"),
-                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption=f"✅ Результат\n{prompt_text[:130]}...")
+                                    types.InputMediaPhoto(
+                                        media=types.BufferedInputFile(photo_bytes, filename="original.jpg"),
+                                        caption="📸 Оригинал"
+                                    ),
+                                    types.InputMediaPhoto(
+                                        media=types.BufferedInputFile(result_bytes, filename="result.jpg"),
+                                        caption=f"✅ Готово для печати"
+                                    )
                                 ]
                             )
                             processing[user_id] = False
                             return
 
+            await bot.send_message(user_id, "❌ Не удалось получить изображение от модели.")
+
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"OpenRouter error: {e}")
         await bot.send_message(user_id, f"❌ Ошибка: {str(e)[:300]}")
 
     processing[user_id] = False
 
 @dp.message()
 async def handle_text(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in photo_storage:
-        return
-
-    text = message.text.strip()
-    if not text:
-        return
-
-    # Пока простой обработчик для custom и bg_custom / clothes_custom
-    await message.answer("🔄 Обрабатываю по твоему описанию...")
-    # Полная реализация будет в следующем шаге, если скажешь
+    # Пока заглушка для "Свой промпт" и кастомных описаний
+    await message.answer("🔄 Функция обработки по тексту пока в разработке.\nПока используй готовые кнопки.")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
