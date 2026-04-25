@@ -21,30 +21,29 @@ photo_storage = {}
 last_result = {}
 processing = {}
 
-# ================= ПРОМПТЫ (сильная защита от рамок) =================
+# ================= ПРОМПТЫ =================
 PROMPTS = {
-    "ritual_with_ribbon": "Улучши качество фото, сделай мягкое студийное освещение, естественную кожу и достойный вид. Добавь в ПРАВЫЙ НИЖНИЙ УГОЛ только простую чёрную траурную ленту по диагонали. Лента аккуратная, без бантиков, без цветов. Сделай строгий нейтральный фон. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. ЗАПРЕЩЕНО добавлять любые рамки, овалы, золотые элементы, текст, подписи или украшения.",
-    
     "restore": "Профессионально восстанови старое фото. Убери царапины, шум, пятна. Сделай чёткость. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+    
+    "ritual_portrait": "Сделай ритуальный портрет с мягким освещением. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+    
+    "ritual_with_ribbon": "Улучши качество фото, сделай мягкое освещение. Добавь в ПРАВЫЙ НИЖНИЙ УГОЛ чёрную траурную ленту по диагонали (простая лента, без бантиков). Сделай строгий фон. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ. Запрещено добавлять рамки, овалы, текст, золотые элементы.",
     
     "clean": "Максимально очисти фото от шума и дефектов. НЕ ИЗМЕНЯЙ ЛИЦО.",
 }
 
 def main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🖼 Ритуальный портрет + лента (нижний угол)", callback_data="ritual_with_ribbon")],
         [InlineKeyboardButton(text="🔧 Восстановить старое фото", callback_data="restore")],
+        [InlineKeyboardButton(text="🖼 Ритуальный портрет", callback_data="ritual_portrait")],
+        [InlineKeyboardButton(text="🖼 Ритуальный портрет + лента", callback_data="ritual_with_ribbon")],
         [InlineKeyboardButton(text="🧼 Максимальная очистка", callback_data="clean")],
         [InlineKeyboardButton(text="✍️ Свой промпт", callback_data="custom")],
     ])
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer(
-        "👋 Бот запущен!\n\n"
-        "Отправь фото и выбери действие.\n"
-        "Лицо защищено, рамки запрещены."
-    )
+    await message.answer("👋 Бот запущен!\nОтправь фото и выбери действие.")
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
@@ -63,7 +62,7 @@ async def process_callback(callback: CallbackQuery):
     data = callback.data
 
     if user_id in processing and processing.get(user_id):
-        await callback.answer("⏳ Уже обрабатывается, подожди...", show_alert=True)
+        await callback.answer("⏳ Уже обрабатывается...", show_alert=True)
         return
 
     if user_id not in photo_storage:
@@ -118,13 +117,13 @@ async def process_callback(callback: CallbackQuery):
                                 chat_id=user_id,
                                 media=[
                                     types.InputMediaPhoto(types.BufferedInputFile(photo_bytes, "original.jpg"), caption="📸 Оригинал"),
-                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово для печати")
+                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово")
                                 ]
                             )
                             processing[user_id] = False
                             return
 
-            await bot.send_message(user_id, "❌ Не удалось получить изображение. Попробуй ещё раз.")
+            await bot.send_message(user_id, "❌ Не удалось получить изображение.")
 
     except Exception as e:
         logging.error(f"Error: {e}")
@@ -134,7 +133,7 @@ async def process_callback(callback: CallbackQuery):
 
 @dp.message()
 async def handle_text(message: types.Message):
-    await message.answer("✅ Промпт принят. (Пока обработка по тексту упрощена)")
+    await message.answer("✅ Промпт принят.")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
