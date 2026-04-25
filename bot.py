@@ -21,18 +21,19 @@ MODEL_NAME = "google/gemini-3.1-flash-image-preview"
 photo_storage = {}      # оригинальное фото
 last_result = {}        # последнее обработанное фото
 processing = {}         # защита от двойного нажатия
+waiting_for = {}        # что сейчас ожидает бот от пользователя
 
-# ================= ПРОМПТЫ (сильная защита лица) =================
+# ================= ПРОМПТЫ =================
 PROMPTS = {
-    "restore": "Профессионально восстанови старое или повреждённое фото. Убери царапины, шум, пятна, трещины, выцветание. Сделай чёткость и естественные цвета. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани полное сходство. Photorealistic, high detail.",
+    "restore": "Профессионально восстанови старое или повреждённое фото. Убери царапины, шум, пятна, трещины, выцветание. Сделай чёткость и естественные цвета. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани полное сходство.",
     
-    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи и фон, чтобы фото стало крупнее). НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Всё должно быть пропорционально и естественно.",
+    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи и фон). НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Всё должно быть пропорционально.",
     
-    "ritual_portrait": "Сделай красивое ритуальное портретное фото с мягким студийным освещением и достойным видом. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство.",
+    "ritual_portrait": "Сделай красивое ритуальное портретное фото с мягким студийным освещением и достойным видом. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА.",
     
-    "ritual_with_ribbon": "Сделай ритуальный портрет и добавь в ПРАВЫЙ НИЖНИЙ УГОЛ чёрную траурную ленту по диагонали. Лента простая, аккуратная, только лента, без бантиков, без цветов, без украшений. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+    "ritual_with_ribbon": "Сделай ритуальный портрет: улучши качество, сделай мягкое освещение, достойный вид и добавь в ПРАВЫЙ НИЖНИЙ УГОЛ чёрную траурную ленту по диагонали. Лента простая, аккуратная, без бантиков и цветов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
     
-    "ritual_strict": "Сделай ритуальный портрет со строгим фоном и строгой одеждой (тёмный костюм или платье). Никаких крестов и лишних траурных элементов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+    "ritual_strict": "Сделай ритуальный портрет со строгим фоном и строгой одеждой. Никаких лишних элементов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
     
     "bg_auto": "Поменяй фон на спокойный нейтральный фон, подходящий для ритуальной печати. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА.",
     
@@ -87,10 +88,7 @@ def clothes_keyboard():
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer(
-        "👋 Ритуальный ретушёр готов к работе!\n\n"
-        "Отправь фото и выбирай нужное действие."
-    )
+    await message.answer("👋 Ритуальный ретушёр готов!\nОтправь фото и выбирай действие.")
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
@@ -101,6 +99,7 @@ async def handle_photo(message: types.Message):
     photo_storage[user_id] = file_bytes.getvalue()
     last_result[user_id] = None
     processing[user_id] = False
+    waiting_for[user_id] = None
 
     await message.answer("✅ Фото получено!\nЧто нужно сделать для траурной печати?", reply_markup=main_keyboard())
 
@@ -118,35 +117,43 @@ async def process_callback(callback: CallbackQuery):
         return
 
     # Открытие подменю
-    if data == "menu:restore":
-        await callback.message.edit_reply_markup(reply_markup=restore_keyboard())
+    if data.startswith("menu:"):
+        if data == "menu:restore":
+            await callback.message.edit_reply_markup(reply_markup=restore_keyboard())
+        elif data == "menu:ritual":
+            await callback.message.edit_reply_markup(reply_markup=ritual_keyboard())
+        elif data == "menu:bg":
+            await callback.message.edit_reply_markup(reply_markup=bg_keyboard())
+        elif data == "menu:clothes":
+            await callback.message.edit_reply_markup(reply_markup=clothes_keyboard())
         return
-    if data == "menu:ritual":
-        await callback.message.edit_reply_markup(reply_markup=ritual_keyboard())
-        return
-    if data == "menu:bg":
-        await callback.message.edit_reply_markup(reply_markup=bg_keyboard())
-        return
-    if data == "menu:clothes":
-        await callback.message.edit_reply_markup(reply_markup=clothes_keyboard())
-        return
+
     if data == "back:main":
         await callback.message.edit_reply_markup(reply_markup=main_keyboard())
         return
 
-    # Защита от двойного нажатия
+    # === Кнопки, которые требуют ввода текста ===
+    if data in ["bg_custom", "clothes_custom", "custom"]:
+        if data == "bg_custom":
+            msg = "Напиши, какой фон хочешь увидеть (например: лес, студия, небо, градиент и т.д.)"
+        elif data == "clothes_custom":
+            msg = "Напиши, какую одежду хочешь (например: тёмный костюм, чёрное платье, строгий пиджак и т.д.)"
+        else:
+            msg = "Напиши свой промпт. Бот автоматически добавит защиту лица в конец."
+
+        await callback.message.edit_text(msg)
+        waiting_for[user_id] = data
+        return
+
+    # === Обычные кнопки с готовыми промптами ===
     processing[user_id] = True
-    await callback.answer("🔄 Обрабатываю через Nano Banana 2...")
+    await callback.message.edit_text("🔄 Обрабатываю... (может занять 15–40 секунд)")
 
     prompt_key = data
     prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
 
     # Выбираем какое фото обрабатывать
-    if prompt_key == "redo_last" and last_result.get(user_id):
-        photo_bytes = last_result[user_id]
-    else:
-        photo_bytes = photo_storage[user_id]
-
+    photo_bytes = last_result.get(user_id) if prompt_key == "redo_last" and last_result.get(user_id) else photo_storage[user_id]
     base64_image = base64.b64encode(photo_bytes).decode("utf-8")
 
     try:
@@ -183,31 +190,50 @@ async def process_callback(callback: CallbackQuery):
                             await bot.send_media_group(
                                 chat_id=user_id,
                                 media=[
-                                    types.InputMediaPhoto(
-                                        media=types.BufferedInputFile(photo_bytes, filename="original.jpg"),
-                                        caption="📸 Оригинал"
-                                    ),
-                                    types.InputMediaPhoto(
-                                        media=types.BufferedInputFile(result_bytes, filename="result.jpg"),
-                                        caption=f"✅ Готово для печати"
-                                    )
+                                    types.InputMediaPhoto(types.BufferedInputFile(photo_bytes, "original.jpg"), caption="📸 Оригинал"),
+                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово для печати")
                                 ]
                             )
                             processing[user_id] = False
                             return
 
-            await bot.send_message(user_id, "❌ Не удалось получить изображение от модели.")
+            await bot.send_message(user_id, "❌ Не удалось получить изображение.")
 
     except Exception as e:
-        logging.error(f"OpenRouter error: {e}")
+        logging.error(f"Error: {e}")
         await bot.send_message(user_id, f"❌ Ошибка: {str(e)[:300]}")
 
     processing[user_id] = False
 
+# ================= ОБРАБОТКА ТЕКСТА (Свой промпт, фон по описанию, одежда по описанию) =================
 @dp.message()
 async def handle_text(message: types.Message):
-    # Пока заглушка для "Свой промпт" и кастомных описаний
-    await message.answer("🔄 Функция обработки по тексту пока в разработке.\nПока используй готовые кнопки.")
+    user_id = message.from_user.id
+    if user_id not in waiting_for or not waiting_for.get(user_id):
+        return
+
+    user_text = message.text.strip()
+    action = waiting_for[user_id]
+    waiting_for[user_id] = None
+
+    if not user_text:
+        await message.answer("Промпт не может быть пустым. Попробуй ещё раз.")
+        return
+
+    await message.answer("🔄 Обрабатываю по твоему описанию...")
+
+    if action == "custom":
+        full_prompt = f"{user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство. No bows, no flowers, no decorations."
+    elif action == "bg_custom":
+        full_prompt = f"Поменяй фон на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА."
+    elif action == "clothes_custom":
+        full_prompt = f"Поменяй одежду на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Одежда должна быть пропорциональной."
+    else:
+        full_prompt = user_text
+
+    # Пока заглушка — полная обработка будет добавлена в следующей версии
+    # (чтобы не ломать стабильность)
+    await message.answer(f"✅ Промпт принят:\n\n{full_prompt[:250]}...\n\nОбработка по тексту будет полностью работать в следующей версии.")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
