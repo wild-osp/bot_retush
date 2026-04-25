@@ -24,65 +24,26 @@ waiting_for = {}
 
 # ================= ПРОМПТЫ =================
 PROMPTS = {
-    "restore": "Профессионально восстанови старое или повреждённое фото. Убери царапины, шум, пятна, трещины, выцветание. Сделай чёткость и естественные цвета. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани полное сходство.",
-    
-    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи и фон). НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Всё должно быть пропорционально.",
-    
-    "ritual_portrait": "Сделай красивое ритуальное портретное фото с мягким студийным освещением и достойным видом. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА.",
-    
-    "ritual_with_ribbon": "Улучши качество фото, сделай мягкое студийное освещение и достойный вид. Добавь в ПРАВЫЙ НИЖНИЙ УГОЛ только чёрную траурную ленту по диагонали. Лента простая, аккуратная, без бантиков, без цветов. Сделай строгий нейтральный фон. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Запрещено добавлять рамки, овалы, текст, золотые элементы.",
-    
-    "ritual_strict": "Сделай ритуальный портрет со строгим фоном и строгой одеждой. Никаких лишних элементов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
-    
-    "bg_auto": "Поменяй фон на спокойный нейтральный фон, подходящий для ритуальной печати. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА.",
-    
-    "clothes_auto": "Поменяй одежду на строгую траурную. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+    "restore": "Профессионально восстанови старое фото. Убери царапины, шум, пятна. Сделай чёткость. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи). НЕ ИЗМЕНЯЙ ЛИЦО.",
+    "ritual_portrait": "Сделай ритуальный портрет с мягким освещением. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО.",
+    "ritual_with_ribbon": "Улучши качество фото, сделай мягкое освещение. Добавь в ПРАВЫЙ НИЖНИЙ УГОЛ чёрную траурную ленту по диагонали (простая лента, без бантиков). Сделай строгий фон. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ. Запрещено добавлять рамки, овалы, текст, золотые элементы.",
+    "clean": "Максимально очисти фото от шума и дефектов. НЕ ИЗМЕНЯЙ ЛИЦО.",
 }
 
 def main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔧 Восстановление старого фото", callback_data="menu:restore")],
-        [InlineKeyboardButton(text="🖼 Ритуальный портрет", callback_data="menu:ritual")],
-        [InlineKeyboardButton(text="🌫 Смена фона", callback_data="menu:bg")],
-        [InlineKeyboardButton(text="👔 Смена одежды", callback_data="menu:clothes")],
+        [InlineKeyboardButton(text="🔧 Восстановить старое фото", callback_data="restore")],
+        [InlineKeyboardButton(text="🔧 Восстановить + расширить", callback_data="restore_extend")],
+        [InlineKeyboardButton(text="🖼 Ритуальный портрет", callback_data="ritual_portrait")],
+        [InlineKeyboardButton(text="🖼 Ритуальный портрет + лента", callback_data="ritual_with_ribbon")],
         [InlineKeyboardButton(text="🧼 Максимальная очистка", callback_data="clean")],
-        [InlineKeyboardButton(text="🎨 Восстановить цвета", callback_data="color_restore")],
         [InlineKeyboardButton(text="✍️ Свой промпт", callback_data="custom")],
-        [InlineKeyboardButton(text="🔄 Доработать последнее фото", callback_data="redo_last")],
-    ])
-
-def restore_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Восстановить старое фото", callback_data="restore")],
-        [InlineKeyboardButton(text="Восстановить + расширить размер", callback_data="restore_extend")],
-        [InlineKeyboardButton(text="← Назад", callback_data="back:main")],
-    ])
-
-def ritual_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Ритуальный портрет", callback_data="ritual_portrait")],
-        [InlineKeyboardButton(text="Ритуальный портрет + лента", callback_data="ritual_with_ribbon")],
-        [InlineKeyboardButton(text="Ритуальный портрет + строгий фон и одежда", callback_data="ritual_strict")],
-        [InlineKeyboardButton(text="← Назад", callback_data="back:main")],
-    ])
-
-def bg_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Автоподбор спокойного фона", callback_data="bg_auto")],
-        [InlineKeyboardButton(text="Смена фона по моему описанию", callback_data="bg_custom")],
-        [InlineKeyboardButton(text="← Назад", callback_data="back:main")],
-    ])
-
-def clothes_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Автоподбор строгой одежды", callback_data="clothes_auto")],
-        [InlineKeyboardButton(text="Смена одежды по моему описанию", callback_data="clothes_custom")],
-        [InlineKeyboardButton(text="← Назад", callback_data="back:main")],
     ])
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("👋 Ритуальный ретушёр готов!\nОтправь фото и выбирай действие.")
+    await message.answer("👋 Бот запущен!\nОтправь фото и выбери действие.")
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
@@ -92,10 +53,8 @@ async def handle_photo(message: types.Message):
 
     photo_storage[user_id] = file_bytes.getvalue()
     last_result[user_id] = None
-    processing[user_id] = False
-    waiting_for[user_id] = None
 
-    await message.answer("✅ Фото получено!\nЧто нужно сделать?", reply_markup=main_keyboard())
+    await message.answer("✅ Фото получено!\nЧто делать?", reply_markup=main_keyboard())
 
 @dp.callback_query()
 async def process_callback(callback: CallbackQuery):
@@ -110,44 +69,17 @@ async def process_callback(callback: CallbackQuery):
         await callback.answer("Фото устарело.", show_alert=True)
         return
 
-    # Подменю
-    if data == "menu:restore":
-        await callback.message.edit_reply_markup(reply_markup=restore_keyboard())
-        return
-    if data == "menu:ritual":
-        await callback.message.edit_reply_markup(reply_markup=ritual_keyboard())
-        return
-    if data == "menu:bg":
-        await callback.message.edit_reply_markup(reply_markup=bg_keyboard())
-        return
-    if data == "menu:clothes":
-        await callback.message.edit_reply_markup(reply_markup=clothes_keyboard())
-        return
-    if data == "back:main":
-        await callback.message.edit_reply_markup(reply_markup=main_keyboard())
+    if data == "custom":
+        await callback.message.edit_text("✍️ Напиши свой промпт:")
+        waiting_for[user_id] = "custom"
         return
 
-    # Кастомные запросы
-    if data in ["bg_custom", "clothes_custom", "custom"]:
-        if data == "bg_custom":
-            text = "Напиши, какой фон хочешь (например: лес, студия, небо...)"
-        elif data == "clothes_custom":
-            text = "Напиши, какую одежду хочешь (например: тёмный костюм, чёрное платье...)"
-        else:
-            text = "Напиши свой промпт. Бот добавит защиту лица."
-        
-        await callback.message.edit_text(text)
-        waiting_for[user_id] = data
-        return
-
-    # Обычные действия
     processing[user_id] = True
-    await callback.message.edit_text("🔄 Обрабатываю... (15–40 секунд)")
+    await callback.message.edit_text("🔄 Обрабатываю...")
 
-    prompt_key = data
-    prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
+    prompt_text = PROMPTS.get(data, "Улучши качество фото, не меняя лицо.")
 
-    photo_bytes = last_result.get(user_id) if prompt_key == "redo_last" and last_result.get(user_id) else photo_storage[user_id]
+    photo_bytes = photo_storage[user_id]
     base64_image = base64.b64encode(photo_bytes).decode("utf-8")
 
     try:
@@ -185,7 +117,7 @@ async def process_callback(callback: CallbackQuery):
                                 chat_id=user_id,
                                 media=[
                                     types.InputMediaPhoto(types.BufferedInputFile(photo_bytes, "original.jpg"), caption="📸 Оригинал"),
-                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово для печати")
+                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово")
                                 ]
                             )
                             processing[user_id] = False
@@ -206,25 +138,13 @@ async def handle_text(message: types.Message):
         return
 
     user_text = message.text.strip()
-    action = waiting_for[user_id]
     waiting_for[user_id] = None
 
-    if not user_text:
-        await message.answer("Текст не может быть пустым.")
-        return
+    await message.answer("🔄 Обрабатываю по твоему промпту...")
 
-    await message.answer("🔄 Обрабатываю по твоему описанию...")
+    full_prompt = f"{user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. No frames, no borders, no text."
 
-    if action == "custom":
-        full_prompt = f"{user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство. No frames, no borders, no text."
-    elif action == "bg_custom":
-        full_prompt = f"Поменяй фон на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА."
-    elif action == "clothes_custom":
-        full_prompt = f"Поменяй одежду на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА."
-    else:
-        full_prompt = user_text
-
-    await message.answer("✅ Промпт принят. (Полная обработка по тексту будет в следующей версии)")
+    await message.answer("✅ Промпт принят (обработка по тексту пока в разработке).")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
