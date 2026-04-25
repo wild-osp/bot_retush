@@ -23,23 +23,24 @@ last_result = {}
 processing = {}
 waiting_for = {}
 
-# ================= ПРОМПТЫ =================
+# ================= ИСПРАВЛЕННЫЕ ПРОМПТЫ =================
 PROMPTS = {
-    "restore": "Профессионально восстанови старое или повреждённое фото. Убери царапины, шум, пятна, трещины, выцветание. Сделай чёткость и естественные цвета. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани полное сходство.",
-    
-    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи и фон). НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Всё должно быть пропорционально.",
-    
-    "ritual_portrait": "Сделай красивое ритуальное портретное фото с мягким студийным освещением и достойным видом. Улучши качество. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА.",
-    
-    "ritual_with_ribbon": "Сделай ритуальный портрет: улучши качество, сделай мягкое освещение, достойный вид и добавь в ПРАВЫЙ НИЖНИЙ УГОЛ чёрную траурную ленту по диагонали. Лента простая, аккуратная, без бантиков и цветов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
-    
-    "ritual_strict": "Сделай ритуальный портрет со строгим фоном и строгой одеждой. Никаких лишних элементов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
-    
-    "bg_auto": "Поменяй фон на спокойный нейтральный фон, подходящий для ритуальной печати. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА.",
-    
-    "clothes_auto": "Поменяй одежду на строгую траурную одежду. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Одежда должна быть пропорциональной.",
+    "restore": "Профессионально восстанови старое или повреждённое фото. Убери царапины, шум, пятна, трещины, выцветание. Сделай чёткость и естественные цвета. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани полное сходство. Photorealistic, high detail, no frames, no borders, no text.",
+
+    "restore_extend": "Восстанови старое фото и немного расширь его (дорисуй плечи и фон). НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Всё должно быть пропорционально. No frames, no borders.",
+
+    "ritual_portrait": "Сделай красивое ритуальное портретное фото: мягкое студийное освещение, спокойный и достойный вид, естественная кожа. Улучши качество и резкость. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани полное сходство. Только само фото, без рамок, без текста, без овалов, без золотых элементов.",
+
+    "ritual_with_ribbon": "Улучши качество фото, сделай мягкое студийное освещение и достойный вид. Добавь в ПРАВЫЙ НИЖНИЙ УГОЛ только чёрную траурную ленту по диагонали (простая аккуратная лента, без бантиков, без цветов, без украшений). Сделай строгий нейтральный фон. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство. Запрещено добавлять любые рамки, овалы, текст, золотые элементы или украшения.",
+
+    "ritual_strict": "Сделай ритуальный портрет со строгим нейтральным фоном и строгой одеждой. Улучши качество. Никаких крестов, цветов, рамок и лишних элементов. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА.",
+
+    "bg_auto": "Поменяй фон на спокойный нейтральный фон, подходящий для ритуальной печати. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА. No frames.",
+
+    "clothes_auto": "Поменяй одежду на строгую траурную. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Одежда должна быть пропорциональной.",
 }
 
+# ================= КЛАВИАТУРЫ (оставил те же) =================
 def main_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(text="🔧 Восстановление старого фото", callback_data="menu:restore")
@@ -86,6 +87,7 @@ def clothes_keyboard():
     kb.adjust(1)
     return kb.as_markup()
 
+# ================= ОСНОВНОЙ КОД =================
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("👋 Ритуальный ретушёр готов!\nОтправь фото и выбирай действие.")
@@ -116,7 +118,6 @@ async def process_callback(callback: CallbackQuery):
         await callback.answer("Фото устарело.", show_alert=True)
         return
 
-    # Подменю
     if data.startswith("menu:"):
         if data == "menu:restore":
             await callback.message.edit_reply_markup(reply_markup=restore_keyboard())
@@ -132,7 +133,7 @@ async def process_callback(callback: CallbackQuery):
         await callback.message.edit_reply_markup(reply_markup=main_keyboard())
         return
 
-    # Кнопки, требующие ввода текста
+    # Кастомные запросы
     if data in ["bg_custom", "clothes_custom", "custom"]:
         if data == "bg_custom":
             text = "Напиши, какой фон хочешь (например: лес, студия, небо, градиент)"
@@ -140,12 +141,12 @@ async def process_callback(callback: CallbackQuery):
             text = "Напиши, какую одежду хочешь (например: тёмный костюм, чёрное платье)"
         else:
             text = "Напиши свой промпт. Бот добавит защиту лица."
-
+        
         await callback.message.edit_text(text)
         waiting_for[user_id] = data
         return
 
-    # Обычные кнопки
+    # Обычные действия
     processing[user_id] = True
     await callback.message.edit_text("🔄 Обрабатываю... (15–40 секунд)")
 
@@ -177,56 +178,32 @@ async def process_callback(callback: CallbackQuery):
 
             data_json = response.json()
 
-            # Улучшенный парсинг ответа Gemini через OpenRouter
-            images = None
             if "choices" in data_json and data_json["choices"]:
-                message_obj = data_json["choices"][0].get("message", {})
-                # Вариант 1: images в message
-                if "images" in message_obj:
-                    images = message_obj["images"]
-                # Вариант 2: content содержит base64
-                elif "content" in message_obj and isinstance(message_obj["content"], str):
-                    content = message_obj["content"]
-                    if "base64" in content:
-                        b64 = content.split("base64,")[-1].split('"')[0] if '"' in content else content.split("base64,")[-1]
-                        result_bytes = base64.b64decode(b64)
-                        last_result[user_id] = result_bytes
-                        await send_result(user_id, photo_bytes, result_bytes, prompt_text)
-                        processing[user_id] = False
-                        return
+                msg = data_json["choices"][0].get("message", {})
+                if msg.get("images"):
+                    for img in msg["images"]:
+                        url = img.get("image_url", {}).get("url", "") or img.get("url", "")
+                        if url.startswith("data:image"):
+                            result_bytes = base64.b64decode(url.split("base64,")[-1])
+                            last_result[user_id] = result_bytes
 
-            if images:
-                for img in images:
-                    url = img.get("image_url", {}).get("url", "") or img.get("url", "")
-                    if url.startswith("data:image"):
-                        result_bytes = base64.b64decode(url.split("base64,")[-1])
-                        last_result[user_id] = result_bytes
-                        await send_result(user_id, photo_bytes, result_bytes, prompt_text)
-                        processing[user_id] = False
-                        return
+                            await bot.send_media_group(
+                                chat_id=user_id,
+                                media=[
+                                    types.InputMediaPhoto(types.BufferedInputFile(photo_bytes, "original.jpg"), caption="📸 Оригинал"),
+                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово для печати")
+                                ]
+                            )
+                            processing[user_id] = False
+                            return
 
-            await bot.send_message(user_id, "❌ Модель не вернула изображение. Попробуй другой промпт.")
+            await bot.send_message(user_id, "❌ Не удалось получить изображение.")
 
     except Exception as e:
-        logging.error(f"OpenRouter error: {e}")
+        logging.error(f"Error: {e}")
         await bot.send_message(user_id, f"❌ Ошибка: {str(e)[:300]}")
 
     processing[user_id] = False
-
-async def send_result(user_id, original_bytes, result_bytes, prompt_text):
-    await bot.send_media_group(
-        chat_id=user_id,
-        media=[
-            types.InputMediaPhoto(
-                media=types.BufferedInputFile(original_bytes, filename="original.jpg"),
-                caption="📸 Оригинал"
-            ),
-            types.InputMediaPhoto(
-                media=types.BufferedInputFile(result_bytes, filename="result.jpg"),
-                caption=f"✅ Готово для печати\n{prompt_text[:140]}..."
-            )
-        ]
-    )
 
 @dp.message()
 async def handle_text(message: types.Message):
@@ -245,16 +222,15 @@ async def handle_text(message: types.Message):
     await message.answer("🔄 Обрабатываю по твоему описанию...")
 
     if action == "custom":
-        full_prompt = f"{user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство."
+        full_prompt = f"{user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство. No frames, no borders, no text."
     elif action == "bg_custom":
-        full_prompt = f"Поменяй фон на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА."
+        full_prompt = f"Поменяй фон на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА. No frames, no borders."
     elif action == "clothes_custom":
-        full_prompt = f"Поменяй одежду на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Одежда должна быть пропорциональной."
+        full_prompt = f"Поменяй одежду на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА. Одежда должна быть пропорциональной. No frames."
     else:
         full_prompt = user_text
 
-    # Здесь можно вставить полный блок обработки (пока заглушка)
-    await message.answer(f"✅ Промпт принят. Полная обработка по тексту будет в следующей версии.")
+    await message.answer("✅ Промпт принят. Полная обработка по тексту будет добавлена в следующей версии.")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
