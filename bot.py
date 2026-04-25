@@ -18,10 +18,10 @@ dp = Dispatcher()
 
 MODEL_NAME = "google/gemini-3.1-flash-image-preview"
 
-photo_storage = {}      # оригинальное фото
-last_result = {}        # последнее обработанное фото
-processing = {}         # защита от двойного нажатия
-waiting_for = {}        # что сейчас ожидает бот от пользователя
+photo_storage = {}
+last_result = {}
+processing = {}
+waiting_for = {}
 
 # ================= ПРОМПТЫ =================
 PROMPTS = {
@@ -101,7 +101,7 @@ async def handle_photo(message: types.Message):
     processing[user_id] = False
     waiting_for[user_id] = None
 
-    await message.answer("✅ Фото получено!\nЧто нужно сделать для траурной печати?", reply_markup=main_keyboard())
+    await message.answer("✅ Фото получено!\nЧто нужно сделать?", reply_markup=main_keyboard())
 
 @dp.callback_query()
 async def process_callback(callback: CallbackQuery):
@@ -109,14 +109,14 @@ async def process_callback(callback: CallbackQuery):
     data = callback.data
 
     if user_id in processing and processing.get(user_id):
-        await callback.answer("⏳ Уже обрабатывается, подожди...", show_alert=True)
+        await callback.answer("⏳ Уже обрабатывается...", show_alert=True)
         return
 
     if user_id not in photo_storage:
-        await callback.answer("Фото устарело. Отправь заново.", show_alert=True)
+        await callback.answer("Фото устарело.", show_alert=True)
         return
 
-    # Открытие подменю
+    # Подменю
     if data.startswith("menu:"):
         if data == "menu:restore":
             await callback.message.edit_reply_markup(reply_markup=restore_keyboard())
@@ -132,27 +132,26 @@ async def process_callback(callback: CallbackQuery):
         await callback.message.edit_reply_markup(reply_markup=main_keyboard())
         return
 
-    # === Кнопки, которые требуют ввода текста ===
+    # Кнопки, требующие ввода текста
     if data in ["bg_custom", "clothes_custom", "custom"]:
         if data == "bg_custom":
-            msg = "Напиши, какой фон хочешь увидеть (например: лес, студия, небо, градиент и т.д.)"
+            text = "Напиши, какой фон хочешь (например: лес, студия, небо, градиент)"
         elif data == "clothes_custom":
-            msg = "Напиши, какую одежду хочешь (например: тёмный костюм, чёрное платье, строгий пиджак и т.д.)"
+            text = "Напиши, какую одежду хочешь (например: тёмный костюм, чёрное платье)"
         else:
-            msg = "Напиши свой промпт. Бот автоматически добавит защиту лица в конец."
+            text = "Напиши свой промпт. Бот добавит защиту лица."
 
-        await callback.message.edit_text(msg)
+        await callback.message.edit_text(text)
         waiting_for[user_id] = data
         return
 
-    # === Обычные кнопки с готовыми промптами ===
+    # Обычные кнопки
     processing[user_id] = True
-    await callback.message.edit_text("🔄 Обрабатываю... (может занять 15–40 секунд)")
+    await callback.message.edit_text("🔄 Обрабатываю... (15–40 секунд)")
 
     prompt_key = data
     prompt_text = PROMPTS.get(prompt_key, "Улучши качество фото, не меняя лицо.")
 
-    # Выбираем какое фото обрабатывать
     photo_bytes = last_result.get(user_id) if prompt_key == "redo_last" and last_result.get(user_id) else photo_storage[user_id]
     base64_image = base64.b64encode(photo_bytes).decode("utf-8")
 
@@ -178,34 +177,57 @@ async def process_callback(callback: CallbackQuery):
 
             data_json = response.json()
 
+            # Улучшенный парсинг ответа Gemini через OpenRouter
+            images = None
             if "choices" in data_json and data_json["choices"]:
-                msg = data_json["choices"][0].get("message", {})
-                if msg.get("images"):
-                    for img in msg["images"]:
-                        url = img.get("image_url", {}).get("url", "")
-                        if url.startswith("data:image"):
-                            result_bytes = base64.b64decode(url.split("base64,")[-1])
-                            last_result[user_id] = result_bytes
+                message_obj = data_json["choices"][0].get("message", {})
+                # Вариант 1: images в message
+                if "images" in message_obj:
+                    images = message_obj["images"]
+                # Вариант 2: content содержит base64
+                elif "content" in message_obj and isinstance(message_obj["content"], str):
+                    content = message_obj["content"]
+                    if "base64" in content:
+                        b64 = content.split("base64,")[-1].split('"')[0] if '"' in content else content.split("base64,")[-1]
+                        result_bytes = base64.b64decode(b64)
+                        last_result[user_id] = result_bytes
+                        await send_result(user_id, photo_bytes, result_bytes, prompt_text)
+                        processing[user_id] = False
+                        return
 
-                            await bot.send_media_group(
-                                chat_id=user_id,
-                                media=[
-                                    types.InputMediaPhoto(types.BufferedInputFile(photo_bytes, "original.jpg"), caption="📸 Оригинал"),
-                                    types.InputMediaPhoto(types.BufferedInputFile(result_bytes, "result.jpg"), caption="✅ Готово для печати")
-                                ]
-                            )
-                            processing[user_id] = False
-                            return
+            if images:
+                for img in images:
+                    url = img.get("image_url", {}).get("url", "") or img.get("url", "")
+                    if url.startswith("data:image"):
+                        result_bytes = base64.b64decode(url.split("base64,")[-1])
+                        last_result[user_id] = result_bytes
+                        await send_result(user_id, photo_bytes, result_bytes, prompt_text)
+                        processing[user_id] = False
+                        return
 
-            await bot.send_message(user_id, "❌ Не удалось получить изображение.")
+            await bot.send_message(user_id, "❌ Модель не вернула изображение. Попробуй другой промпт.")
 
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"OpenRouter error: {e}")
         await bot.send_message(user_id, f"❌ Ошибка: {str(e)[:300]}")
 
     processing[user_id] = False
 
-# ================= ОБРАБОТКА ТЕКСТА (Свой промпт, фон по описанию, одежда по описанию) =================
+async def send_result(user_id, original_bytes, result_bytes, prompt_text):
+    await bot.send_media_group(
+        chat_id=user_id,
+        media=[
+            types.InputMediaPhoto(
+                media=types.BufferedInputFile(original_bytes, filename="original.jpg"),
+                caption="📸 Оригинал"
+            ),
+            types.InputMediaPhoto(
+                media=types.BufferedInputFile(result_bytes, filename="result.jpg"),
+                caption=f"✅ Готово для печати\n{prompt_text[:140]}..."
+            )
+        ]
+    )
+
 @dp.message()
 async def handle_text(message: types.Message):
     user_id = message.from_user.id
@@ -217,13 +239,13 @@ async def handle_text(message: types.Message):
     waiting_for[user_id] = None
 
     if not user_text:
-        await message.answer("Промпт не может быть пустым. Попробуй ещё раз.")
+        await message.answer("Текст не может быть пустым.")
         return
 
     await message.answer("🔄 Обрабатываю по твоему описанию...")
 
     if action == "custom":
-        full_prompt = f"{user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство. No bows, no flowers, no decorations."
+        full_prompt = f"{user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ И ЧЕРТЫ ЛИЦА ЧЕЛОВЕКА. Сохрани максимальное сходство."
     elif action == "bg_custom":
         full_prompt = f"Поменяй фон на: {user_text}. НЕ ИЗМЕНЯЙ ЛИЦО, ГЛАЗА, РОТ, УШИ, ОДЕЖДУ И ЧЕРТЫ ЛИЦА."
     elif action == "clothes_custom":
@@ -231,9 +253,8 @@ async def handle_text(message: types.Message):
     else:
         full_prompt = user_text
 
-    # Пока заглушка — полная обработка будет добавлена в следующей версии
-    # (чтобы не ломать стабильность)
-    await message.answer(f"✅ Промпт принят:\n\n{full_prompt[:250]}...\n\nОбработка по тексту будет полностью работать в следующей версии.")
+    # Здесь можно вставить полный блок обработки (пока заглушка)
+    await message.answer(f"✅ Промпт принят. Полная обработка по тексту будет в следующей версии.")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
