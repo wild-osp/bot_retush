@@ -5,7 +5,7 @@ import os
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import httpx
@@ -18,13 +18,15 @@ dp = Dispatcher()
 
 MODEL_NAME = "google/gemini-3.1-flash-image-preview"
 
-photo_storage = {}   # оригинальное фото
-last_result = {}     # последнее успешно обработанное фото
+photo_storage = {}    # оригинальное фото по user_id
+last_result = {}      # последнее успешно обработанное фото по user_id
+last_prompt = {}      # последний использованный промпт по user_id
+custom_mode = {}      # режим для своих промптов по user_id
 
 # ================= ПРОМПТЫ =================
 
 PROMPTS = {
-    # Восстановление
+    # Восстановление и улучшение
     "restore_old": (
         "Профессионально восстанови старое или повреждённое фото: убери царапины, шум, пыль, трещины, "
         "выцветание. Сохрани естественные цвета и резкость. "
@@ -41,6 +43,12 @@ PROMPTS = {
         "СТРОГО: не изменять лицо и черты лица."
     ),
 
+    "expand_restore": (
+        "Расширь изображение (outpainting): дорисуй недостающие части плеч, груди, одежды и фона. "
+        "Сохрани стиль и естественный вид. "
+        "СТРОГО: не изменять лицо, черты лица, мимику, форму головы."
+    ),
+
     # Ритуальный портрет
     "ritual_portrait": (
         "Создай строгий ритуальный портрет с мягким студийным освещением и аккуратной композицией. "
@@ -48,7 +56,14 @@ PROMPTS = {
         "Только чистый строгий портрет. Лицо и черты лица не изменять."
     ),
 
-    # Лента
+    "expand_ritual": (
+        "Расширь ритуальный портрет (outpainting): добавь недостающие части плеч, груди, одежды и фона. "
+        "Сохрани строгий стиль и освещение. "
+        "СТРОГО: не изменять лицо, черты лица, мимику, форму головы. "
+        "СТРОГО: никаких рамок, крестов, свечей, бантиков, декоративных элементов, орнаментов, надписей."
+    ),
+
+    # Траурная лента
     "ribbon_bottom": (
         "Добавь в правый нижний угол изображения чёрную атласную траурную ленту по диагонали. "
         "Лента должна быть аккуратной, без бантиков, без украшений. "
@@ -102,6 +117,12 @@ PROMPTS = {
         "Убери шум, артефакты и цифровые искажения. "
         "СТРОГО: не изменять лицо и черты лица."
     ),
+
+    "expand_normal": (
+        "Расширь изображение (outpainting): добавь недостающие части плеч, груди, одежды и фона. "
+        "Сохрани стиль, цвет и освещение. "
+        "СТРОГО: не изменять лицо, черты лица, мимику, форму головы."
+    ),
 }
 
 # ================= КЛАВИАТУРЫ =================
@@ -124,6 +145,7 @@ def restore_keyboard():
     kb.button(text="🔧 Восстановить старое фото", callback_data="restore_old")
     kb.button(text="🧼 Максимальная очистка", callback_data="clean_max")
     kb.button(text="🎨 Восстановить цвета", callback_data="color_restore")
+    kb.button(text="➕ Расширить фото", callback_data="expand_restore")
     kb.button(text="← Назад", callback_data="back:main")
     kb.adjust(1)
     return kb.as_markup()
@@ -131,6 +153,7 @@ def restore_keyboard():
 def ritual_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(text="🖼 Создать ритуальный портрет", callback_data="ritual_portrait")
+    kb.button(text="➕ Расширить ритуальный портрет", callback_data="expand_ritual")
     kb.button(text="✍️ Свой ритуальный промпт", callback_data="custom_ritual")
     kb.button(text="← Назад", callback_data="back:main")
     kb.adjust(1)
@@ -161,6 +184,7 @@ def normal_keyboard():
     kb.button(text="✨ Улучшить качество", callback_data="enhance_quality")
     kb.button(text="🎨 Изменить стиль", callback_data="style_change")
     kb.button(text="🧹 Убрать шум", callback_data="denoise")
+    kb.button(text="➕ Расширить фото", callback_data="expand_normal")
     kb.button(text="✍️ Свой промпт", callback_data="custom_normal")
     kb.button(text="← Назад", callback_data="back:main")
     kb.adjust(1)
@@ -168,7 +192,9 @@ def normal_keyboard():
 
 # ================= ОБРАБОТКА ФОТО =================
 
-async def process_image(user_id, prompt_text, photo_bytes):
+async def process_image(user_id: int, prompt_text: str, photo_bytes: bytes):
+    last_prompt[user_id] = prompt_text
+
     await bot.send_message(user_id, "🔄 Обрабатываю фото…")
 
     base64_image = base64.b64encode(photo_bytes).decode("utf-8")
@@ -184,10 +210,13 @@ async def process_image(user_id, prompt_text, photo_bytes):
                 },
                 json={
                     "model": MODEL_NAME,
-                    "messages": [{"role": "user", "content": [
-                        {"type": "text", "text": prompt_text},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                    ]}],
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt_text},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                        ]
+                    }],
                     "modalities": ["image", "text"],
                     "max_tokens": 2048,
                 }
@@ -243,6 +272,8 @@ async def handle_photo(message: types.Message):
 
     photo_storage[user_id] = file_bytes.getvalue()
     last_result[user_id] = None
+    last_prompt[user_id] = None
+    custom_mode[user_id] = "global"
 
     await message.answer("📸 Фото получено!\nВыбери действие:", reply_markup=main_keyboard())
 
@@ -275,22 +306,43 @@ async def process_callback(callback: CallbackQuery):
         await callback.message.edit_reply_markup(reply_markup=main_keyboard())
         return
 
-    # Свои промпты
-    if data.startswith("custom"):
-        mode = data.split("_")[1] if "_" in data else "global"
-        await callback.message.edit_text(f"✍️ Напиши свой промпт ({mode}).")
-        dp.custom_mode = mode
+    # Доработать последнее фото
+    if data == "redo_last":
+        if user_id in last_result and last_result[user_id] and user_id in last_prompt and last_prompt[user_id]:
+            await callback.message.delete()
+            await process_image(user_id, last_prompt[user_id], last_result[user_id])
+        else:
+            await callback.answer("Нет последнего результата для доработки.", show_alert=True)
         return
 
-    # Обработка
+    # Свои промпты
+    if data.startswith("custom"):
+        if data == "custom_global":
+            mode = "global"
+        elif data == "custom_ritual":
+            mode = "ritual"
+        elif data == "custom_bg":
+            mode = "bg"
+        elif data == "custom_clothes":
+            mode = "clothes"
+        elif data == "custom_normal":
+            mode = "normal"
+        else:
+            mode = "global"
+
+        custom_mode[user_id] = mode
+        await callback.message.edit_text("✍️ Напиши свой промпт.")
+        return
+
+    # Стандартные действия по промптам
     prompt_text = PROMPTS.get(data)
     if not prompt_text:
         await callback.answer("Ошибка: неизвестная команда.")
         return
 
     await callback.message.delete()
-    photo_bytes = last_result[user_id] if data == "redo_last" and last_result[user_id] else photo_storage[user_id]
 
+    photo_bytes = photo_storage[user_id]
     await process_image(user_id, prompt_text, photo_bytes)
 
 @dp.message()
@@ -299,14 +351,21 @@ async def handle_custom_prompt(message: types.Message):
     if user_id not in photo_storage:
         return
 
-    mode = getattr(dp, "custom_mode", "global")
-    user_text = message.text.strip()
+    mode = custom_mode.get(user_id, "global")
+    user_text = (message.text or "").strip()
+    if not user_text:
+        return
 
     if mode == "ritual":
         full_prompt = (
             f"{user_text}. "
-            "СТРОГО: никаких рамок, крестов, свечей, бантиков, декоративных элементов. "
+            "СТРОГО: никаких рамок, крестов, свечей, бантиков, декоративных элементов, орнаментов, надписей. "
             "Не изменять лицо и черты лица."
+        )
+    elif mode in ("bg", "clothes", "normal", "global"):
+        full_prompt = (
+            f"{user_text}. "
+            "СТРОГО: не изменять лицо, черты лица, мимику, форму головы, глаза, рот, нос, уши."
         )
     else:
         full_prompt = (
